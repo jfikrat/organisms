@@ -50,12 +50,36 @@ switch (cmd) {
 // ── INIT ──
 async function init(mission: string) {
   if (!mission) { console.error("Usage: organisms init <mission>"); process.exit(1); }
-  if (existsSync("CLAUDE.md")) { console.error("Error: CLAUDE.md already exists. Organism already lives here."); process.exit(1); }
+
+  // Safety checks — never overwrite existing files
+  const conflicts: string[] = [];
+  if (existsSync("CLAUDE.md")) conflicts.push("CLAUDE.md (project instructions)");
+  if (existsSync(".tracking/status.md")) conflicts.push(".tracking/status.md");
+  if (existsSync(".learning/lessons.md")) conflicts.push(".learning/lessons.md");
+
+  if (conflicts.length > 0) {
+    console.error("Error: These files already exist:");
+    for (const c of conflicts) console.error(`   - ${c}`);
+    console.error("\nThis directory already has an organism or conflicting files.");
+    console.error("Use a clean directory or remove these files first.");
+    process.exit(1);
+  }
+
+  // Warn about existing .claude/ — don't overwrite user's settings
+  const existingClaude: string[] = [];
+  if (existsSync(".claude/settings.json")) existingClaude.push(".claude/settings.json");
+  if (existsSync(".claude/agents")) existingClaude.push(".claude/agents/");
 
   console.log("🧬 Creating organism...");
   console.log(`   Mission: ${mission}\n`);
 
-  // Create structure
+  if (existingClaude.length > 0) {
+    console.log("   Note: Existing files preserved (not overwritten):");
+    for (const f of existingClaude) console.log(`   - ${f}`);
+    console.log("");
+  }
+
+  // Create structure — mkdir -p is safe, never overwrites
   mkdirSync(".tracking", { recursive: true });
   mkdirSync(".learning", { recursive: true });
   mkdirSync(".claude/agents", { recursive: true });
@@ -64,9 +88,9 @@ async function init(mission: string) {
   // Read DNA template
   const dna = readFileSync(join(ROOT, "templates/dna.md"), "utf-8");
 
-  // Copy researcher agent template
+  // Copy researcher agent template — only if not exists
   const researcherSrc = join(ROOT, "agents/researcher.md");
-  if (existsSync(researcherSrc)) {
+  if (existsSync(researcherSrc) && !existsSync(".claude/agents/researcher.md")) {
     writeFileSync(".claude/agents/researcher.md", readFileSync(researcherSrc, "utf-8"));
   }
 
@@ -119,12 +143,18 @@ ${dna}
   writeFileSync(".learning/playbook.md", "# Playbook\n");
   writeFileSync(".learning/failures.md", "# Failures\n");
 
-  // Permission presets
-  writeFileSync(".claude/settings.json", JSON.stringify({
-    permissions: {
-      allow: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "CronCreate", "CronList", "CronDelete", "Agent"]
-    }
-  }, null, 2));
+  // Permission presets — merge with existing settings, don't overwrite
+  const settingsPath = ".claude/settings.json";
+  let settings: any = {};
+  if (existsSync(settingsPath)) {
+    try { settings = JSON.parse(readFileSync(settingsPath, "utf-8")); } catch {}
+    console.log("   Merged organism permissions into existing .claude/settings.json");
+  }
+  const orgTools = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "CronCreate", "CronList", "CronDelete", "Agent"];
+  const existing = settings.permissions?.allow || [];
+  const merged = [...new Set([...existing, ...orgTools])];
+  settings.permissions = { ...settings.permissions, allow: merged };
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
   // Register in global organism list
   registerOrganism(process.cwd(), mission);
