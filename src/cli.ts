@@ -60,6 +60,7 @@ const HELP = `${BANNER}
   ${B}observe${R}
     ${C}status${R}             vital signs
     ${C}list${R}               view the colony
+    ${C}dash${R}               live colony dashboard
 
   ${B}grow & evolve${R}
     ${C}grow${R} ${D}<role>${R}         spawn a new agent
@@ -92,6 +93,7 @@ switch (cmd) {
   case "evolve": await evolve(args); break;
   case "attach": await attach(); break;
   case "logs": await logs(); break;
+  case "dashboard": case "dash": case "d": await import("./dashboard.ts"); break;
   default: console.error(`unknown command: ${cmd}\nrun 'organisms --help' for usage.`); process.exit(1);
 }
 
