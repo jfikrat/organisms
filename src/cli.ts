@@ -36,6 +36,8 @@ const HELP = `${BANNER}
     ${CYAN}grow${RESET} ${DIM}<role>${RESET}         Spawn a new agent
     ${CYAN}shrink${RESET} ${DIM}[name]${RESET}       Remove an idle agent
     ${CYAN}evolve${RESET} ${DIM}[concern]${RESET}    Trigger self-evaluation and adaptation
+    ${CYAN}attach${RESET}             Attach to the running organism's terminal
+    ${CYAN}logs${RESET} ${DIM}[-f]${RESET}           Show recent journal entries (-f to follow)
 
   ${BOLD}Examples:${RESET}
     ${DIM}$${RESET} organisms init ${YELLOW}"Watch crypto markets, track sigma levels"${RESET}
@@ -60,6 +62,8 @@ switch (cmd) {
   case "grow": await grow(args); break;
   case "shrink": await shrink(args); break;
   case "evolve": await evolve(args); break;
+  case "attach": await attach(); break;
+  case "logs": await logs(); break;
   default: console.error(`Unknown command: ${cmd}\nRun 'organisms --help' for usage.`); process.exit(1);
 }
 
@@ -167,9 +171,22 @@ ${dna}
     console.log("   Merged organism permissions into existing .claude/settings.json");
   }
   const orgTools = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "CronCreate", "CronList", "CronDelete", "Agent"];
+  const denyRules = ["Write:~/.ssh/**", "Write:~/.aws/**", "Write:~/.env", "Write:~/.claude/settings.json", "Bash:rm -rf /"];
   const existing = settings.permissions?.allow || [];
+  const existingDeny = settings.permissions?.deny || [];
   const merged = [...new Set([...existing, ...orgTools])];
-  settings.permissions = { ...settings.permissions, allow: merged };
+  const mergedDeny = [...new Set([...existingDeny, ...denyRules])];
+  settings.permissions = { ...settings.permissions, allow: merged, deny: mergedDeny };
+
+  // Install safety hooks
+  const hooksFile = join(ROOT, "hooks/hooks.json");
+  if (existsSync(hooksFile)) {
+    try {
+      const hooksConfig = JSON.parse(readFileSync(hooksFile, "utf-8"));
+      if (hooksConfig.hooks) settings.hooks = hooksConfig.hooks;
+    } catch {}
+  }
+
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
   // Register in global organism list
@@ -224,6 +241,12 @@ async function stop() {
     return;
   }
   await $`tmux kill-session -t ${sessionName}`.nothrow();
+
+  // Deregister from global organism list
+  const reg = loadRegistry();
+  delete reg[process.cwd()];
+  writeFileSync(getRegistryPath(), JSON.stringify(reg, null, 2));
+
   console.log(`⏹ Organism stopped. Session ${sessionName} killed.`);
   console.log("   .learning/ preserved — knowledge survives death.");
 }
@@ -280,6 +303,17 @@ async function status() {
 // ── LIST ──
 async function list() {
   const registry = loadRegistry();
+
+  // Auto-prune deleted organisms
+  const pruned: string[] = [];
+  for (const [path] of Object.entries(registry)) {
+    if (!existsSync(join(path, "CLAUDE.md"))) { delete registry[path]; pruned.push(path); }
+  }
+  if (pruned.length > 0) {
+    writeFileSync(getRegistryPath(), JSON.stringify(registry, null, 2));
+    console.log(`  ${DIM}Pruned ${pruned.length} deleted organisms${RESET}`);
+  }
+
   if (Object.keys(registry).length === 0) {
     console.log("No organisms found.");
     return;
@@ -341,13 +375,15 @@ async function shrink(name: string) {
   if (agents.length === 0) { console.error("No agents to remove."); process.exit(1); }
 
   if (!name) {
-    // Auto — pick first non-researcher
-    const target = agents.find(a => a !== "researcher.md") || agents[0];
-    name = target.replace(".md", "");
+    console.log("  Agents:");
+    agents.forEach((a, i) => console.log(`    ${i + 1}. ${a.replace(".md", "")}`));
+    console.log("\n  Specify: organisms shrink <name>");
+    process.exit(0);
   }
 
-  const agentPath = `.claude/agents/${name}.md`;
-  if (!existsSync(agentPath)) { console.error(`Agent "${name}" not found.`); process.exit(1); }
+  const safeName = name.toLowerCase().replace(/[^a-z0-9-]+/g, "").slice(0, 30);
+  const agentPath = `.claude/agents/${safeName}.md`;
+  if (!existsSync(agentPath)) { console.error(`Agent "${safeName}" not found.`); process.exit(1); }
 
   rmSync(agentPath);
   console.log(`🔻 Agent "${name}" removed.`);
@@ -369,9 +405,37 @@ async function evolve(concern: string) {
     ? `Evolve: evaluate your effectiveness regarding "${concern}". Read .learning/ and .tracking/journal.md. Adapt your behavior — change cron intervals, rewrite agent instructions, update priorities. Log mutations.`
     : `Evolve: run a full self-evaluation. Read .learning/ and .tracking/journal.md. What worked? What failed? What's stuck? Adapt — change intervals, rewrite agents, update priorities. Log mutations.`;
 
-  await $`tmux send-keys -t ${sessionName} ${prompt} Enter`;
+  // Sanitize for tmux send-keys
+  const safePrompt = prompt.replace(/['"\\`$]/g, "");
+  await $`tmux send-keys -t ${sessionName} ${safePrompt} Enter`;
   console.log(`🧬 Evolution triggered. The organism is evaluating itself.`);
   console.log(`   Attach to watch: tmux attach -t ${sessionName}`);
+}
+
+// ── ATTACH ──
+async function attach() {
+  if (!existsSync("CLAUDE.md")) { console.error("No organism here."); process.exit(1); }
+  const sessionName = getSessionName();
+  const running = await $`tmux has-session -t ${sessionName} 2>/dev/null`.nothrow();
+  if (running.exitCode !== 0) { console.error("Organism not running. Start it: organisms start"); process.exit(1); }
+  await $`tmux attach -t ${sessionName}`.nothrow();
+}
+
+// ── LOGS ──
+async function logs() {
+  if (!existsSync(".tracking/journal.md")) { console.error("No journal found."); process.exit(1); }
+  const follow = process.argv.includes("-f");
+  if (follow) {
+    await $`tail -f .tracking/journal.md`.nothrow();
+  } else {
+    const content = readFileSync(".tracking/journal.md", "utf-8");
+    const lines = content.split("\n").filter(l => l.startsWith("["));
+    const last20 = lines.slice(-20);
+    if (last20.length === 0) { console.log("  No entries yet."); return; }
+    console.log(`\n  ${BOLD}Journal${RESET} ${DIM}(last ${last20.length} entries)${RESET}\n`);
+    for (const l of last20) console.log(`  ${l}`);
+    console.log("");
+  }
 }
 
 // ── Helpers ──

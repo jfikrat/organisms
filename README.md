@@ -1,4 +1,4 @@
-# 🧬 Organisms
+# Organisms
 
 Autonomous living agents for Claude Code. Create self-managing AI organisms that sense, adapt, grow, shrink, learn, and evolve.
 
@@ -16,127 +16,139 @@ An organism is a Claude Code session that behaves like a living system:
 
 Zero custom code. Just markdown and Claude Code native features.
 
-## Quick Start
+## Installation
 
 ```bash
-# 1. Clone
+# Clone
 git clone https://github.com/jfikrat/organisms.git ~/.organisms
 
-# 2. Create an organism
-cd ~/my-project
-~/.organisms/init.sh "Watch crypto markets, track sigma levels, detect regime changes"
-
-# 3. Start it
-claude --dangerously-skip-permissions --init-prompt "Boot"
+# Symlink the CLI
+ln -s ~/.organisms/src/cli.ts ~/bin/organisms
 ```
 
-The organism will come alive — set up its own cron cycles, fetch data, observe, learn, and grow agents as needed.
-
-## With Plugin Skills
-
-For interactive control over your organism:
+Or, if you prefer `bun link`:
 
 ```bash
-claude --dangerously-skip-permissions --plugin-dir ~/.organisms
+git clone https://github.com/jfikrat/organisms.git ~/.organisms
+cd ~/.organisms
+bun link
 ```
 
-This gives you:
+## Usage
 
-| Skill | What it does |
-|-------|-------------|
-| `/organisms:init <mission>` | Create a new organism in the current directory |
-| `/organisms:status` | Show vital signs — health, agents, cron, learning progress |
-| `/organisms:grow <role>` | Spawn a new specialized agent |
-| `/organisms:shrink [name]` | Remove an idle agent (merges its knowledge first) |
-| `/organisms:evolve [concern]` | Trigger self-evaluation and adaptation |
+```bash
+# Create an organism
+cd ~/my-project
+organisms init "Watch crypto markets, track sigma levels, detect regime changes"
+
+# Start it (runs in tmux)
+organisms start
+
+# Attach to see what it's doing
+organisms attach
+
+# Check vital signs
+organisms status
+
+# Tail the journal
+organisms logs -f
+
+# Spawn a new agent
+organisms grow "data analyst for SQL queries"
+
+# Remove an agent
+organisms shrink analyst
+
+# Trigger self-evaluation
+organisms evolve "watcher cycle is too slow"
+
+# Stop
+organisms stop
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `organisms init <mission>` | Create a new organism in the current directory |
+| `organisms start` | Start the organism (opens Claude Code in tmux) |
+| `organisms stop` | Stop the running organism |
+| `organisms status` | Show vital signs |
+| `organisms list` | List all organisms on this machine |
+| `organisms grow <role>` | Spawn a new agent |
+| `organisms shrink [name]` | Remove an idle agent |
+| `organisms evolve [concern]` | Trigger self-evaluation and adaptation |
+| `organisms attach` | Attach to the running organism's terminal |
+| `organisms logs [-f]` | Show recent journal entries (-f to follow) |
 
 ## How It Works
 
 Every organism has the same DNA (instincts) but a unique mission:
 
 ```
-CLAUDE.md = mission + instincts + boot-sequence
-  ├── <mission>     What this organism does (unique per organism)
-  ├── <instincts>   Shared DNA — how to sense, grow, shrink, learn, evolve
-  ├── <boot-sequence>  How to come alive on startup
-  └── <conventions>    File naming and output rules
+CLAUDE.md = mission + invariants + instincts + boot-sequence
+  +-- <mission>       What this organism does (unique per organism)
+  +-- <invariants>    Immutable safety constraints (never modified)
+  +-- <instincts>     Shared DNA -- how to sense, grow, shrink, learn, evolve
+  +-- <boot-sequence> How to come alive on startup
+  +-- <conventions>   File naming and output rules
 ```
 
 ### Directory Structure
 
 ```
 your-project/
-├── CLAUDE.md              ← Brain (mission + DNA)
-├── .tracking/
-│   ├── status.md          ← Current state (overwritten each cycle)
-│   ├── journal.md         ← Append-only observation log
-│   └── priorities.md      ← Current focus (rewritten in daily review)
-├── .learning/
-│   ├── lessons.md         ← Validated insights (append-only, permanent)
-│   ├── playbook.md        ← Successful patterns (append-only)
-│   └── failures.md        ← What broke and why (append-only)
-└── .claude/
-    ├── agents/            ← Subagents (organism grows these itself)
-    └── skills/            ← Custom skills (organism creates as needed)
++-- CLAUDE.md              <- Brain (mission + DNA)
++-- .tracking/
+|   +-- status.md          <- Current state (overwritten each cycle)
+|   +-- journal.md         <- Append-only observation log
+|   +-- priorities.md      <- Current focus (rewritten in daily review)
++-- .learning/
+|   +-- lessons.md         <- Validated insights (append-only, permanent)
+|   +-- playbook.md        <- Successful patterns (append-only)
+|   +-- failures.md        <- What broke and why (append-only)
++-- .claude/
+    +-- settings.json      <- Permissions + safety hooks
+    +-- agents/            <- Subagents (organism grows these itself)
+    +-- skills/            <- Custom skills (organism creates as needed)
 ```
 
-### Lifecycle
+## Safety
 
-```
-BIRTH → Claude Code opens, reads CLAUDE.md
-  │
-BOOT → Sets up CronCreate jobs (heartbeat)
-  │
-OBSERVE → Periodic sensing cycle (e.g. every 5 min)
-  │     Fetch data → compare with last state → journal if changed
-  │     5x "no change" → slow down rhythm (adaptation)
-  │     Big change → speed up rhythm, maybe spawn agent
-  │
-REVIEW → Daily self-evaluation
-  │     Extract patterns → update .learning/
-  │     Re-prioritize → what matters now?
-  │     Agent audit → grow or shrink?
-  │
-GROWTH → When overwhelmed, spawn specialized agents
-  │     Transfers knowledge from .learning/ (DNA copying)
-  │     Agent works independently, reports back
-  │
-EVOLUTION → When strategies fail 3+ times
-  │     Rewrites own behavior (mutates CLAUDE.md approach)
-  │     Logs the mutation in .tracking/journal.md
-  │
-DEATH → User says "stop" or session ends
-        .learning/ persists — knowledge survives death
-        Next boot picks up where it left off
-```
+Organisms ship with multiple safety layers:
 
-## Examples
+### Invariants
 
-```bash
-# Market observer
-organisms-init "ETH/BTC market structure observer. Track sigma, detect regime shifts."
+Every organism's CLAUDE.md contains an `<invariants>` block with immutable rules:
 
-# Project manager
-organisms-init "Track JIRA tickets, daily standup summaries, deadline warnings."
+- Cannot modify its own mission or invariants
+- Cannot write files outside its project directory
+- Cannot set cron faster than every 3 minutes
+- Cannot spawn more than 3 agents simultaneously
+- Cannot delete `.learning/` files (knowledge is permanent)
+- Cannot exfiltrate data to external servers
+- Cannot modify `.claude/settings.json`
 
-# Content monitor
-organisms-init "Watch Twitter mentions, summarize sentiment, alert on viral posts."
+### Permission Model
 
-# Personal assistant
-organisms-init "Morning briefing, calendar review, reminder management."
+The generated `.claude/settings.json` includes:
 
-# DevOps monitor
-organisms-init "Watch deploy pipeline, alert on failures, track error rates."
-```
+- **Allow**: Bash, Read, Write, Edit, Glob, Grep, CronCreate, CronList, CronDelete, Agent
+- **Deny**: Write to `~/.ssh/**`, `~/.aws/**`, `~/.env`, `~/.claude/settings.json`; `rm -rf /`
+
+### Safety Hooks
+
+A pre-tool-use hook checks Bash commands for destructive operations (`rm -rf`, `drop table`, `kill -9`) targeting files outside organism directories.
 
 ## Requirements
 
 - [Claude Code](https://claude.com/code) v2.1.72+
-- Claude Max or API key
+- [Bun](https://bun.sh) runtime
+- tmux (for background sessions)
 
 ## Philosophy
 
-Organisms are not frameworks — they are a pattern. The entire system is markdown instructions that Claude Code interprets. No runtime, no dependencies, no build step.
+Organisms are not frameworks -- they are a pattern. The entire system is markdown instructions that Claude Code interprets. No runtime, no dependencies, no build step.
 
 The organism's intelligence comes from Claude. The pattern just gives it:
 - A reason to wake up (CronCreate)
