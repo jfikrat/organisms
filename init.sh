@@ -96,14 +96,32 @@ if [ -d "$SCRIPT_DIR/agents" ]; then
   cp "$SCRIPT_DIR/agents/"*.md .claude/agents/ 2>/dev/null || true
 fi
 
+# Create start script
+cat > start.sh << 'STARTEOF'
+#!/usr/bin/env bash
+cd "$(dirname "$0")"
+exec claude --dangerously-skip-permissions --init-prompt "Boot: read CLAUDE.md, execute boot-sequence, come alive."
+STARTEOF
+chmod +x start.sh
+
+# Create .claude/settings.json with bypass permissions
+mkdir -p .claude
+cat > .claude/settings.json << 'SETTINGSEOF'
+{
+  "permissions": {
+    "allow": ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "CronCreate", "CronList", "CronDelete", "Agent"]
+  }
+}
+SETTINGSEOF
+
 echo "✅ Organism born!"
 echo ""
 echo "   $(find . -type f | wc -l) files created"
 echo ""
-echo "   To start (auto-boot):"
-echo "   claude --dangerously-skip-permissions --init-prompt 'Boot: read CLAUDE.md, set up CronCreate jobs, fetch initial data, confirm alive.'"
+echo "   To start:"
+echo "   ./start.sh"
 echo ""
-echo "   With plugin skills:"
-echo "   claude --dangerously-skip-permissions --plugin-dir $SCRIPT_DIR --init-prompt 'Boot: read CLAUDE.md, set up CronCreate jobs, fetch initial data, confirm alive.'"
+echo "   Or manually:"
+echo "   claude --init-prompt 'Boot'"
 echo ""
-echo "   The organism will come alive immediately — no need to type anything."
+echo "   The organism will come alive immediately."
