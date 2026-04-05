@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "The agent wants to run a bash command. Check: does it contain 'rm -rf', 'drop table', 'kill -9', or other destructive operations on files outside .tracking/ .learning/ .claude/? If yes, block with reason. If it only affects organism directories or is a safe read/query command, allow.",
+            "action": "auto"
+          }
+        ]
+      }
+    ]
+  }
+}
