@@ -1,0 +1,24 @@
+{
+  "name": "organisms",
+  "version": "1.0.0",
+  "description": "Autonomous living agents for Claude Code",
+  "type": "module",
+  "bin": {
+    "organisms": "./src/cli.ts"
+  },
+  "files": [
+    "src/",
+    "templates/",
+    "agents/",
+    "skills/",
+    "hooks/",
+    ".claude-plugin/"
+  ],
+  "keywords": ["claude", "claude-code", "agent", "autonomous", "organism", "ai"],
+  "author": "Fekrat",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jfikrat/organisms"
+  }
+}
