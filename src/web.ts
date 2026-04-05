@@ -137,6 +137,205 @@ function getJournalEntries(orgName: string, limit = 50): JournalEntry[] {
   return [];
 }
 
+// ── Organism Detail ──
+interface OrganismDetail {
+  name: string;
+  path: string;
+  mission: string;
+  alive: boolean;
+  born: string;
+  uptime: string;
+  state: string;
+  thoughts: number;
+  lastHeartbeat: string;
+  agents: { name: string; description: string }[];
+  knowledge: {
+    lessons: number;
+    patterns: number;
+    failures: number;
+    lessonsList: string[];
+    playbookList: string[];
+  };
+  priorities: string[];
+  studies: string[];
+  invariants: string[];
+  dnaVersion: string;
+  journal: JournalEntry[];
+}
+
+function getOrganismDetail(orgName: string): OrganismDetail | null {
+  const registry = loadRegistry();
+  const entries = Object.entries(registry) as [string, any][];
+
+  for (const [path, info] of entries) {
+    if (basename(path) !== orgName) continue;
+    if (!existsSync(join(path, "CLAUDE.md"))) return null;
+
+    const sessionName = pathToSession(path);
+    const alive = isSessionAlive(sessionName);
+    const name = basename(path);
+
+    // Read CLAUDE.md for mission, invariants, dna version
+    let mission = info.mission || "";
+    let invariants: string[] = [];
+    let dnaVersion = "";
+    const claudePath = join(path, "CLAUDE.md");
+    if (existsSync(claudePath)) {
+      const claude = readFileSync(claudePath, "utf-8");
+      const missionMatch = claude.match(/<mission>\s*([\s\S]*?)\s*<\/mission>/);
+      if (missionMatch) mission = missionMatch[1].trim();
+      const invariantsMatch = claude.match(/<invariants>\s*([\s\S]*?)\s*<\/invariants>/);
+      if (invariantsMatch) {
+        invariants = invariantsMatch[1].split("\n")
+          .map(l => l.replace(/^[-*]\s*/, "").trim())
+          .filter(l => l.length > 0);
+      }
+      const dnaMatch = claude.match(/<!-- organisms-dna v(.*?) -->/);
+      if (dnaMatch) dnaVersion = "v" + dnaMatch[1];
+    }
+
+    // Status
+    let born = "";
+    let state = "";
+    const statusPath = join(path, ".tracking/status.md");
+    if (existsSync(statusPath)) {
+      const s = readFileSync(statusPath, "utf-8");
+      born = s.match(/Born: (.+)/)?.[1]?.trim() || "";
+      state = s.match(/State: (.+)/)?.[1]?.trim() || "";
+    }
+
+    // Uptime
+    let uptime = "";
+    if (born) {
+      const ms = Date.now() - new Date(born).getTime();
+      if (ms > 0) {
+        const d = Math.floor(ms / 86400000);
+        const h = Math.floor((ms % 86400000) / 3600000);
+        const m = Math.floor((ms % 3600000) / 60000);
+        if (d > 0) uptime = `${d}d ${h}h`;
+        else if (h > 0) uptime = `${h}h ${m}m`;
+        else uptime = `${m}m`;
+      }
+    }
+
+    // Journal
+    let thoughts = 0;
+    let lastHeartbeat = "";
+    const journal: JournalEntry[] = [];
+    const jPath = join(path, ".tracking/journal.md");
+    if (existsSync(jPath)) {
+      const lines = readFileSync(jPath, "utf-8").split("\n").filter(l => l.startsWith("["));
+      thoughts = lines.length;
+      const tail = lines.slice(-30);
+      for (const l of tail) {
+        const m = l.match(/^\[(.+?)\]\s*(.*)/);
+        if (m) journal.push({ time: m[1], text: m[2] });
+      }
+      if (lines.length > 0) {
+        const last = lines[lines.length - 1];
+        const timeMatch = last.match(/\[(.+?)\]/);
+        if (timeMatch) {
+          const ts = new Date(timeMatch[1]);
+          if (!isNaN(ts.getTime())) {
+            const diff = Date.now() - ts.getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 1) lastHeartbeat = "just now";
+            else if (mins < 60) lastHeartbeat = `${mins}m ago`;
+            else lastHeartbeat = `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
+          } else {
+            lastHeartbeat = timeMatch[1];
+          }
+        }
+      }
+    }
+
+    // Priorities
+    let priorities: string[] = [];
+    const priPath = join(path, ".tracking/priorities.md");
+    if (existsSync(priPath)) {
+      priorities = readFileSync(priPath, "utf-8").split("\n")
+        .filter(l => /^(\d+[.)]\s+|-\s+)/.test(l.trim()))
+        .map(l => l.trim().replace(/^(\d+[.)]\s+|-\s+)/, "").trim())
+        .filter(l => l.length > 0);
+    }
+
+    // Agents
+    const agents: { name: string; description: string }[] = [];
+    const agentsDir = join(path, ".claude/agents");
+    if (existsSync(agentsDir)) {
+      try {
+        const files = readdirSync(agentsDir).filter(f => f.endsWith(".md"));
+        for (const f of files) {
+          const agentName = f.replace(".md", "");
+          let description = "";
+          try {
+            const content = readFileSync(join(agentsDir, f), "utf-8");
+            const descMatch = content.match(/description:\s*"?([^"\n]+)"?/);
+            if (descMatch) description = descMatch[1].trim().slice(0, 120);
+          } catch {}
+          agents.push({ name: agentName, description });
+        }
+      } catch {}
+    }
+
+    // Knowledge: lessons
+    let lessonsCount = 0;
+    let lessonsList: string[] = [];
+    const lessonsPath = join(path, ".learning/lessons.md");
+    if (existsSync(lessonsPath)) {
+      const lines = readFileSync(lessonsPath, "utf-8").split("\n")
+        .filter(l => l.trim().length > 0 && !l.startsWith("#"));
+      lessonsCount = lines.length;
+      lessonsList = lines.slice(-10);
+    }
+
+    // Knowledge: playbook (patterns)
+    let patternsCount = 0;
+    let playbookList: string[] = [];
+    const playbookPath = join(path, ".learning/playbook.md");
+    if (existsSync(playbookPath)) {
+      const lines = readFileSync(playbookPath, "utf-8").split("\n")
+        .filter(l => l.trim().length > 0 && !l.startsWith("#"));
+      patternsCount = lines.length;
+      playbookList = lines.slice(-10);
+    }
+
+    // Knowledge: failures
+    let failuresCount = 0;
+    const failuresPath = join(path, ".learning/failures.md");
+    if (existsSync(failuresPath)) {
+      const lines = readFileSync(failuresPath, "utf-8").split("\n")
+        .filter(l => l.trim().length > 0 && !l.startsWith("#"));
+      failuresCount = lines.length;
+    }
+
+    // Studies
+    let studies: string[] = [];
+    const studiesDir = join(path, ".learning/studies");
+    if (existsSync(studiesDir)) {
+      try {
+        studies = readdirSync(studiesDir)
+          .filter(f => f.endsWith(".md"))
+          .map(f => f.replace(".md", ""));
+      } catch {}
+    }
+
+    return {
+      name, path, mission, alive, born, uptime, state, thoughts,
+      lastHeartbeat, agents,
+      knowledge: {
+        lessons: lessonsCount,
+        patterns: patternsCount,
+        failures: failuresCount,
+        lessonsList,
+        playbookList,
+      },
+      priorities, studies, invariants, dnaVersion, journal,
+    };
+  }
+  return null;
+}
+
 // ── HTML Template ──
 const HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -694,6 +893,299 @@ const HTML = `<!DOCTYPE html>
   .ws-dot.connected { background: var(--primary); }
   .ws-dot.disconnected { background: var(--danger); }
 
+  /* ── Detail Panel ── */
+  .detail-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+    display: none;
+    backdrop-filter: blur(2px);
+  }
+  .detail-overlay.open { display: block; }
+
+  .detail-panel {
+    position: fixed;
+    top: 0;
+    right: -65%;
+    width: 60%;
+    height: 100vh;
+    background: #0d1117;
+    border-left: 1px solid rgba(34, 197, 94, 0.2);
+    overflow-y: auto;
+    transition: right 0.3s ease;
+    z-index: 100;
+    padding: 2rem;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+  }
+  .detail-panel.open { right: 0; }
+
+  .close-btn {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    background: none;
+    border: none;
+    color: var(--dim);
+    font-size: 28px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 8px;
+    transition: color 0.2s;
+    font-family: inherit;
+  }
+  .close-btn:hover { color: var(--text); }
+
+  .detail-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding-right: 40px;
+  }
+
+  .detail-status {
+    font-size: 14px;
+    line-height: 1;
+  }
+  .detail-status.on { color: var(--primary); text-shadow: 0 0 8px var(--primary-dim); }
+  .detail-status.off { color: var(--dim); }
+
+  .detail-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    flex: 1;
+    margin: 0;
+  }
+
+  .detail-uptime {
+    font-size: 12px;
+    color: var(--secondary);
+    font-weight: 500;
+  }
+
+  .detail-heartbeat {
+    font-size: 11px;
+    color: var(--dim);
+    margin-bottom: 20px;
+  }
+
+  .detail-dna {
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-left: 8px;
+    opacity: 0.6;
+  }
+
+  .detail-divider {
+    border: none;
+    border-top: 1px solid rgba(34, 197, 94, 0.1);
+    margin: 16px 0;
+    position: relative;
+  }
+
+  .detail-section {
+    margin-bottom: 20px;
+  }
+
+  .detail-section h3 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: rgba(34, 197, 94, 0.5);
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+
+  .detail-mission {
+    font-size: 13px;
+    color: var(--dim-light);
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+
+  .detail-state {
+    font-size: 12px;
+    color: var(--dim-light);
+    margin-bottom: 20px;
+  }
+  .detail-state span { color: var(--primary); }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 4px;
+  }
+
+  .knowledge-stats {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  .knowledge-stats > div {
+    font-size: 12px;
+    color: var(--dim);
+  }
+
+  .stat-num {
+    color: var(--secondary);
+    font-weight: 700;
+    font-size: 16px;
+    margin-right: 4px;
+  }
+
+  .knowledge-items {
+    margin-top: 10px;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .knowledge-items div {
+    font-size: 11px;
+    color: var(--dim);
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(107, 114, 128, 0.06);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agent-list .agent-item {
+    font-size: 12px;
+    padding: 4px 0;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .agent-item .agent-sym {
+    color: var(--primary);
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  .agent-item .agent-name {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .agent-item .agent-desc {
+    color: var(--dim);
+    font-size: 11px;
+  }
+
+  .priorities-list {
+    list-style: none;
+    counter-reset: pri;
+  }
+
+  .priorities-list li {
+    font-size: 12px;
+    color: var(--dim-light);
+    padding: 3px 0;
+    counter-increment: pri;
+  }
+
+  .priorities-list li::before {
+    content: counter(pri) ".";
+    color: var(--secondary);
+    font-weight: 600;
+    margin-right: 8px;
+    font-size: 11px;
+  }
+
+  .studies-list div {
+    font-size: 12px;
+    color: var(--dim);
+    padding: 3px 0;
+  }
+
+  .studies-list div::before {
+    content: "\\2022 ";
+    color: var(--primary);
+    margin-right: 6px;
+  }
+
+  .invariants-list {
+    list-style: none;
+  }
+
+  .invariants-list li {
+    font-size: 11px;
+    color: rgba(239, 68, 68, 0.55);
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(239, 68, 68, 0.05);
+  }
+
+  .detail-journal {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .detail-journal .dj-entry {
+    display: flex;
+    gap: 10px;
+    font-size: 12px;
+    padding: 3px 0;
+  }
+
+  .detail-journal .dj-time {
+    color: var(--secondary);
+    font-weight: 500;
+    white-space: nowrap;
+    min-width: 48px;
+    flex-shrink: 0;
+  }
+
+  .detail-journal .dj-text {
+    color: var(--dim);
+    word-break: break-word;
+  }
+
+  .detail-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(34, 197, 94, 0.1);
+  }
+
+  .detail-actions button {
+    background: var(--surface);
+    border: 1px solid rgba(107, 114, 128, 0.2);
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--dim-light);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 0.5px;
+  }
+
+  .detail-actions button:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+    border-color: rgba(107, 114, 128, 0.35);
+  }
+
+  .detail-actions button:nth-child(1):hover { border-color: var(--primary-dim); color: var(--primary); }
+  .detail-actions button:nth-child(2):hover { border-color: var(--danger-dim); color: var(--danger); }
+  .detail-actions button:nth-child(3):hover { border-color: var(--accent-dim); color: var(--accent); }
+
+  .detail-actions button:active { transform: scale(0.97); }
+
+  .detail-empty {
+    color: var(--dim);
+    font-size: 12px;
+    font-style: italic;
+  }
+
   /* ── Responsive ── */
   @media (max-width: 640px) {
     .container { padding: 12px; }
@@ -704,6 +1196,8 @@ const HTML = `<!DOCTYPE html>
     .journal-entries { max-height: 260px; }
     .actions { gap: 8px; }
     .action-btn { padding: 8px 14px; }
+    .detail-panel { width: 100%; right: -105%; }
+    .detail-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -776,6 +1270,13 @@ const HTML = `<!DOCTYPE html>
     <button class="action-btn evolve" data-action="evolve">evolve</button>
   </div>
 
+</div>
+
+<!-- Detail Panel -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetail()"></div>
+<div class="detail-panel" id="detailPanel">
+  <button class="close-btn" onclick="closeDetail()">&times;</button>
+  <div id="detailContent"></div>
 </div>
 
 <!-- Toast -->
@@ -906,12 +1407,182 @@ const HTML = `<!DOCTYPE html>
       .catch(() => {});
   }
 
+  // ── Detail Panel ──
+  let currentDetail = null;
+  const detailPanel = document.getElementById('detailPanel');
+  const detailOverlay = document.getElementById('detailOverlay');
+  const detailContent = document.getElementById('detailContent');
+
+  window.closeDetail = function() {
+    detailPanel.classList.remove('open');
+    detailOverlay.classList.remove('open');
+    currentDetail = null;
+  };
+
+  window.openDetail = function(name) {
+    currentDetail = name;
+    selectedName = name;
+    renderColony(colony);
+    detailContent.innerHTML = '<div style="color:var(--dim);padding:40px;text-align:center;">loading...</div>';
+    detailPanel.classList.add('open');
+    detailOverlay.classList.add('open');
+    fetch('/api/organism/' + encodeURIComponent(name))
+      .then(function(r) { return r.json(); })
+      .then(function(data) { renderDetail(data); })
+      .catch(function() {
+        detailContent.innerHTML = '<div style="color:var(--danger);padding:40px;text-align:center;">failed to load</div>';
+      });
+  };
+
+  function renderDetail(data) {
+    var h = '';
+
+    // Header
+    h += '<div class="detail-header">';
+    h += '<span class="detail-status ' + (data.alive ? 'on' : 'off') + '">&#x25CF;</span>';
+    h += '<h2 class="detail-name">' + esc(data.name) + '</h2>';
+    if (data.dnaVersion) h += '<span class="detail-dna">' + esc(data.dnaVersion) + '</span>';
+    if (data.uptime) h += '<span class="detail-uptime">' + esc(data.uptime) + '</span>';
+    h += '</div>';
+
+    // State + heartbeat
+    if (data.state || data.lastHeartbeat) {
+      h += '<div class="detail-state">';
+      if (data.state) h += '<span>' + esc(data.state) + '</span>';
+      if (data.lastHeartbeat) h += ' &mdash; last heartbeat: ' + esc(data.lastHeartbeat);
+      h += '</div>';
+    }
+
+    // Mission
+    h += '<hr class="detail-divider">';
+    h += '<div class="detail-section"><h3>mission</h3>';
+    h += '<p class="detail-mission">' + esc(data.mission || 'no mission defined') + '</p>';
+    h += '</div>';
+
+    // Knowledge + Agents grid
+    h += '<hr class="detail-divider">';
+    h += '<div class="detail-grid">';
+
+    // Knowledge
+    h += '<div class="detail-section"><h3>knowledge</h3>';
+    h += '<div class="knowledge-stats">';
+    h += '<div><span class="stat-num">' + (data.knowledge.lessons || 0) + '</span>lessons</div>';
+    h += '<div><span class="stat-num">' + (data.knowledge.patterns || 0) + '</span>patterns</div>';
+    h += '<div><span class="stat-num">' + (data.knowledge.failures || 0) + '</span>failures</div>';
+    h += '</div>';
+    if (data.knowledge.lessonsList && data.knowledge.lessonsList.length > 0) {
+      h += '<div class="knowledge-items">';
+      for (var i = 0; i < data.knowledge.lessonsList.length; i++) {
+        h += '<div>' + esc(data.knowledge.lessonsList[i]) + '</div>';
+      }
+      h += '</div>';
+    }
+    if (data.knowledge.playbookList && data.knowledge.playbookList.length > 0) {
+      h += '<div class="knowledge-items" style="margin-top:6px;">';
+      for (var i = 0; i < data.knowledge.playbookList.length; i++) {
+        h += '<div>' + esc(data.knowledge.playbookList[i]) + '</div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
+
+    // Agents
+    h += '<div class="detail-section"><h3>agents</h3>';
+    if (data.agents && data.agents.length > 0) {
+      h += '<div class="agent-list">';
+      for (var i = 0; i < data.agents.length; i++) {
+        var a = data.agents[i];
+        h += '<div class="agent-item">';
+        h += '<span class="agent-sym">&#x25E6;&#xB7;&#x25E6;</span>';
+        h += '<span><span class="agent-name">' + esc(a.name) + '</span>';
+        if (a.description) h += ' <span class="agent-desc">&mdash; ' + esc(a.description) + '</span>';
+        h += '</span></div>';
+      }
+      h += '</div>';
+    } else {
+      h += '<div class="detail-empty">no agents spawned</div>';
+    }
+    h += '</div>';
+    h += '</div>'; // end grid
+
+    // Priorities
+    if (data.priorities && data.priorities.length > 0) {
+      h += '<hr class="detail-divider">';
+      h += '<div class="detail-section"><h3>priorities</h3>';
+      h += '<ol class="priorities-list">';
+      for (var i = 0; i < data.priorities.length; i++) {
+        h += '<li>' + esc(data.priorities[i]) + '</li>';
+      }
+      h += '</ol></div>';
+    }
+
+    // Studies
+    if (data.studies && data.studies.length > 0) {
+      h += '<hr class="detail-divider">';
+      h += '<div class="detail-section"><h3>studies</h3>';
+      h += '<div class="studies-list">';
+      for (var i = 0; i < data.studies.length; i++) {
+        h += '<div>' + esc(data.studies[i]) + '</div>';
+      }
+      h += '</div></div>';
+    }
+
+    // Invariants
+    if (data.invariants && data.invariants.length > 0) {
+      h += '<hr class="detail-divider">';
+      h += '<div class="detail-section"><h3>invariants</h3>';
+      h += '<ul class="invariants-list">';
+      for (var i = 0; i < data.invariants.length; i++) {
+        h += '<li>' + esc(data.invariants[i]) + '</li>';
+      }
+      h += '</ul></div>';
+    }
+
+    // Journal
+    if (data.journal && data.journal.length > 0) {
+      h += '<hr class="detail-divider">';
+      h += '<div class="detail-section"><h3>recent journal</h3>';
+      h += '<div class="detail-journal">';
+      for (var i = 0; i < data.journal.length; i++) {
+        var e = data.journal[i];
+        h += '<div class="dj-entry"><span class="dj-time">' + esc(e.time) + '</span><span class="dj-text">' + esc(e.text) + '</span></div>';
+      }
+      h += '</div></div>';
+    }
+
+    // Actions
+    h += '<div class="detail-actions">';
+    h += '<button onclick="detailAction(\\'' + esc(data.name) + '\\', \\'start\\')">start</button>';
+    h += '<button onclick="detailAction(\\'' + esc(data.name) + '\\', \\'stop\\')">stop</button>';
+    h += '<button onclick="detailAction(\\'' + esc(data.name) + '\\', \\'evolve\\')">evolve</button>';
+    h += '</div>';
+
+    detailContent.innerHTML = h;
+    detailPanel.scrollTop = 0;
+  }
+
+  window.detailAction = function(name, action) {
+    fetch('/api/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, action: action })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (res.ok) showToast(action + ': ' + name, false);
+      else showToast(res.error || 'failed', true);
+    })
+    .catch(function() { showToast('request failed', true); });
+  };
+
   // ── Select organism (event delegation) ──
   cardsEl.addEventListener('click', function(e) {
     var card = e.target.closest('[data-org]');
     if (!card) return;
-    selectedName = card.getAttribute('data-org');
+    var name = card.getAttribute('data-org');
+    selectedName = name;
     renderColony(colony);
+    openDetail(name);
   });
 
   // ── Actions (event delegation) ──
@@ -963,6 +1634,11 @@ const HTML = `<!DOCTYPE html>
     };
   }
 
+  // ── Keyboard ──
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && currentDetail) closeDetail();
+  });
+
   // ── Init ──
   fetch('/api/colony')
     .then(r => r.json())
@@ -991,6 +1667,12 @@ const server = Bun.serve({
     "/api/journal/:name": (req) => {
       const name = req.params.name;
       return Response.json(getJournalEntries(name));
+    },
+    "/api/organism/:name": (req) => {
+      const name = req.params.name;
+      const detail = getOrganismDetail(name);
+      if (!detail) return Response.json({ error: "organism not found" }, { status: 404 });
+      return Response.json(detail);
     },
   },
   fetch(req, server) {
