@@ -6,27 +6,43 @@ import { $ } from "bun";
 const ROOT = dirname(dirname(import.meta.filename));
 const VERSION = "1.0.0";
 
-const HELP = `
-🧬 organisms v${VERSION} — Autonomous living agents for Claude Code
+const DIM = "\x1b[2m";
+const BOLD = "\x1b[1m";
+const GREEN = "\x1b[32m";
+const CYAN = "\x1b[36m";
+const YELLOW = "\x1b[33m";
+const MAGENTA = "\x1b[35m";
+const RESET = "\x1b[0m";
 
-Usage: organisms <command> [options]
+const BANNER = `
+${DIM}    ╭──────────────────────────────────────╮${RESET}
+${DIM}    │${RESET}  ${GREEN}○${RESET}${DIM}──${RESET}${GREEN}○${RESET}                                ${DIM}│${RESET}
+${DIM}    │${RESET}  ${GREEN}│${RESET}${DIM}╲╱${RESET}${GREEN}│${RESET}  ${BOLD}organisms${RESET} ${DIM}v${VERSION}${RESET}            ${DIM}│${RESET}
+${DIM}    │${RESET}  ${GREEN}○${RESET}${DIM}──${RESET}${GREEN}○${RESET}                                ${DIM}│${RESET}
+${DIM}    │${RESET}  ${GREEN}│${RESET}${DIM}╲╱${RESET}${GREEN}│${RESET}  ${DIM}autonomous living agents${RESET}    ${DIM}│${RESET}
+${DIM}    │${RESET}  ${GREEN}○${RESET}${DIM}──${RESET}${GREEN}○${RESET}  ${DIM}for claude code${RESET}             ${DIM}│${RESET}
+${DIM}    ╰──────────────────────────────────────╯${RESET}
+`;
 
-Commands:
-  init <mission>     Create a new organism in the current directory
-  start              Start the organism (opens Claude Code, auto-boots)
-  stop               Stop the running organism
-  status             Show vital signs
-  list               List all organisms on this machine
-  grow <role>        Spawn a new agent
-  shrink [name]      Remove an idle agent
-  evolve [concern]   Trigger self-evaluation and adaptation
+const HELP = `${BANNER}
+  ${BOLD}Usage:${RESET} organisms ${CYAN}<command>${RESET} ${DIM}[options]${RESET}
 
-Examples:
-  organisms init "Watch crypto markets, track sigma levels"
-  organisms start
-  organisms status
-  organisms grow "data analyst for SQL queries"
-  organisms evolve "watcher cycle is too slow"
+  ${BOLD}Commands:${RESET}
+    ${CYAN}init${RESET} ${DIM}<mission>${RESET}     Create a new organism in the current directory
+    ${CYAN}start${RESET}              Start the organism ${DIM}(opens Claude Code, auto-boots)${RESET}
+    ${CYAN}stop${RESET}               Stop the running organism
+    ${CYAN}status${RESET}             Show vital signs
+    ${CYAN}list${RESET}               List all organisms on this machine
+    ${CYAN}grow${RESET} ${DIM}<role>${RESET}         Spawn a new agent
+    ${CYAN}shrink${RESET} ${DIM}[name]${RESET}       Remove an idle agent
+    ${CYAN}evolve${RESET} ${DIM}[concern]${RESET}    Trigger self-evaluation and adaptation
+
+  ${BOLD}Examples:${RESET}
+    ${DIM}$${RESET} organisms init ${YELLOW}"Watch crypto markets, track sigma levels"${RESET}
+    ${DIM}$${RESET} organisms start
+    ${DIM}$${RESET} organisms status
+    ${DIM}$${RESET} organisms grow ${YELLOW}"data analyst for SQL queries"${RESET}
+    ${DIM}$${RESET} organisms evolve ${YELLOW}"watcher cycle is too slow"${RESET}
 `;
 
 const cmd = process.argv[2];
@@ -70,8 +86,8 @@ async function init(mission: string) {
   if (existsSync(".claude/settings.json")) existingClaude.push(".claude/settings.json");
   if (existsSync(".claude/agents")) existingClaude.push(".claude/agents/");
 
-  console.log("🧬 Creating organism...");
-  console.log(`   Mission: ${mission}\n`);
+  console.log(BANNER);
+  console.log(`  ${BOLD}Mission:${RESET} ${YELLOW}${mission}${RESET}\n`);
 
   if (existingClaude.length > 0) {
     console.log("   Note: Existing files preserved (not overwritten):");
@@ -160,13 +176,13 @@ ${dna}
   registerOrganism(process.cwd(), mission);
 
   const count = readdirSync(".", { recursive: true }).length;
-  console.log(`✅ Organism born! (${count} files)`);
+  console.log(`  ${GREEN}✅ Organism born!${RESET} ${DIM}(${count} files)${RESET}`);
   console.log("");
-  console.log("   Start it:");
-  console.log("   organisms start");
+  console.log(`  ${BOLD}Start it:${RESET}`);
+  console.log(`  ${DIM}$${RESET} organisms start`);
   console.log("");
-  console.log("   Or manually:");
-  console.log("   claude --init-prompt 'Boot'");
+  console.log(`  ${DIM}Or manually:${RESET}`);
+  console.log(`  ${DIM}$${RESET} claude --init-prompt 'Boot'`);
 }
 
 // ── START ──
@@ -192,11 +208,11 @@ async function start() {
   // Start in tmux
   await $`tmux new-session -d -s ${sessionName} -c ${cwd} "${claude} --dangerously-skip-permissions --init-prompt 'Boot: read CLAUDE.md, execute boot-sequence, come alive.'"`;
 
-  console.log(`✅ Alive! Session: ${sessionName}`);
+  console.log(`  ${GREEN}✅ Alive!${RESET} Session: ${CYAN}${sessionName}${RESET}`);
   console.log("");
-  console.log(`   Attach:  tmux attach -t ${sessionName}`);
-  console.log(`   Status:  organisms status`);
-  console.log(`   Stop:    organisms stop`);
+  console.log(`  ${DIM}Attach:${RESET}  tmux attach -t ${sessionName}`);
+  console.log(`  ${DIM}Status:${RESET}  organisms status`);
+  console.log(`  ${DIM}Stop:${RESET}    organisms stop`);
 }
 
 // ── STOP ──
@@ -220,8 +236,8 @@ async function status() {
   const running = await $`tmux has-session -t ${sessionName} 2>/dev/null`.nothrow();
   const alive = running.exitCode === 0;
 
-  console.log(`\n🧬 Organism Status\n`);
-  console.log(`   ${alive ? "🟢 ALIVE" : "⏸ STOPPED"}  (session: ${sessionName})`);
+  console.log(BANNER);
+  console.log(`  ${alive ? `${GREEN}● ALIVE${RESET}` : `${DIM}○ STOPPED${RESET}`}  ${DIM}session: ${CYAN}${sessionName}${RESET}`);
 
   // Mission
   const claude = readFileSync("CLAUDE.md", "utf-8");
